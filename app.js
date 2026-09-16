@@ -1436,3 +1436,17 @@ if ("serviceWorker" in navigator) {
 }
 
 console.log("SyncRoom app loaded.");
+async function testFirebase() {
+  try {
+    const result = await signInAnonymously(auth);
+
+    console.log("Firebase connected");
+    console.log("Project:", auth.app.options.projectId);
+    console.log("Anonymous UID:", result.user.uid);
+  } catch (error) {
+    console.error("Firebase error code:", error.code);
+    console.error("Firebase error message:", error.message);
+  }
+}
+
+testFirebase();
