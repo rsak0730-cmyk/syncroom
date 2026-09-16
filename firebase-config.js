@@ -17,19 +17,22 @@ import {
 
 import {
   getAuth,
-  signInAnonymously
+  signInAnonymously,
+  onAuthStateChanged
 } from
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCmZvHjY3wol0ED6YDDaReNPGlNMGKello",
   authDomain: "syncroom-1c200.firebaseapp.com",
+
+  // Replace this with the exact URL shown in Firebase Realtime Database
+  databaseURL: "PASTE_YOUR_REAL_DATABASE_URL_HERE",
+
   projectId: "syncroom-1c200",
   storageBucket: "syncroom-1c200.firebasestorage.app",
   messagingSenderId: "248664766695",
-  appId: "1:248664766695:web:f873e5c3f690dcc2cd0a42",
-  measurementId: "G-SJMV75FS95"
+  appId: "1:248664766695:web:f873e5c3f690dcc2cd0a42"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -47,5 +50,6 @@ export {
   onDisconnect,
   remove,
   serverTimestamp,
-  signInAnonymously
+  signInAnonymously,
+  onAuthStateChanged
 };
