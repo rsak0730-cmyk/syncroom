@@ -1,0 +1,11 @@
+{
+  "name": "SyncRoom",
+  "short_name": "SyncRoom",
+  "description": "Listen to YouTube together in synchronized rooms.",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "icons": []
+}
