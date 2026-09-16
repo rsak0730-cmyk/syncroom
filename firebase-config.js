@@ -21,10 +21,10 @@ import {
 } from
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCmZvHjY3wol0ED6YDDaReNPGlNMGKello",
   authDomain: "syncroom-1c200.firebaseapp.com",
-  databaseURL: "PASTE_REALTIME_DATABASE_URL_HERE",
   projectId: "syncroom-1c200",
   storageBucket: "syncroom-1c200.firebasestorage.app",
   messagingSenderId: "248664766695",
