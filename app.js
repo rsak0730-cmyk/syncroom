@@ -13,22 +13,51 @@ import {
   signInAnonymously
 } from "./firebase-config.js";
 
-const YOUTUBE_API_KEY = "AIzaSyDzvPXVkAkiW6xMzo6zV671pMNRF_1M200'";
-
 const state = {
   user: null,
   roomCode: null,
   room: null,
+  stopRoomListener: null,
   player: null,
   playerReady: false,
-  roomUnsubscribe: null,
-  syncTimer: null,
-  progressTimer: null,
-  deferredInstall: null,
-  applyingRemoteState: false
+  applyingRemote: false,
+  syncTimer: null
 };
 
 const $ = id => document.getElementById(id);
+
+const db = path => ref(database, path);
+
+function showError(message) {
+  const element = $("welcomeError");
+  if (element) element.textContent = message || "";
+  console.error(message);
+}
+
+function showToast(message) {
+  const element = $("toast");
+
+  if (!element) {
+    console.log(message);
+    return;
+  }
+
+  element.textContent = message;
+  element.classList.add("show");
+
+  setTimeout(() => {
+    element.classList.remove("show");
+  }, 2500);
+}
+
+function setConnection(connected) {
+  const element = $("connectionStatus");
+
+  if (!element) return;
+
+  element.textContent = connected ? "Connected" : "Offline";
+  element.className = connected ? "online" : "offline";
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -40,26 +69,14 @@ function escapeHtml(value) {
 }
 
 function getName() {
-  const inputName = $("nameInput")?.value.trim();
+  const typedName = $("nameInput")?.value.trim();
+  const savedName = localStorage.getItem("syncroom-name");
 
-  return (
-    inputName ||
-    localStorage.getItem("syncroom-name") ||
-    "Guest"
-  ).slice(0, 24);
+  return (typedName || savedName || "Guest").slice(0, 24);
 }
 
-function saveName(value) {
-  localStorage.setItem("syncroom-name", value);
-}
-
-function createRoomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-  return Array.from(
-    { length: 6 },
-    () => alphabet[Math.floor(Math.random() * alphabet.length)]
-  ).join("");
+function saveName() {
+  localStorage.setItem("syncroom-name", getName());
 }
 
 function randomColor() {
@@ -76,52 +93,25 @@ function randomColor() {
   return colors[Math.floor(Math.random() * colors.length)];
 }
 
-function showError(message) {
-  if ($("welcomeError")) {
-    $("welcomeError").textContent = message || "";
-  }
+function createRoomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  return Array.from(
+    { length: 6 },
+    () => chars[Math.floor(Math.random() * chars.length)]
+  ).join("");
 }
 
-function showToast(message) {
-  const element = $("toast");
-
-  if (!element) return;
-
-  element.textContent = message;
-  element.classList.add("show");
-
-  setTimeout(() => {
-    element.classList.remove("show");
-  }, 2500);
+function roomPath() {
+  return `rooms/${state.roomCode}`;
 }
 
-function setConnection(connected) {
-  const element = $("connectionStatus");
-
-  if (!element) return;
-
-  element.textContent = connected ? "Connected" : "Offline";
-  element.className = `status ${connected ? "online" : "offline"}`;
+function currentRoomRef() {
+  return db(roomPath());
 }
 
-function roomReference() {
-  return ref(database, `rooms/${state.roomCode}`);
-}
-
-function membersReference() {
-  return ref(database, `rooms/${state.roomCode}/members`);
-}
-
-function queueReference() {
-  return ref(database, `rooms/${state.roomCode}/queue`);
-}
-
-function chatReference() {
-  return ref(database, `rooms/${state.roomCode}/chat`);
-}
-
-function activityReference() {
-  return ref(database, `rooms/${state.roomCode}/activity`);
+function currentMemberRef() {
+  return db(`${roomPath()}/members/${state.user.uid}`);
 }
 
 function isHost() {
@@ -130,40 +120,6 @@ function isHost() {
     state.room &&
     state.room.hostId === state.user.uid
   );
-}
-
-function getCurrentPosition() {
-  if (
-    state.player &&
-    state.playerReady &&
-    typeof state.player.getCurrentTime === "function"
-  ) {
-    return Number(state.player.getCurrentTime() || 0);
-  }
-
-  return Number(state.room?.state?.position || 0);
-}
-
-function formatTime(seconds) {
-  const value = Math.max(0, Math.floor(Number(seconds) || 0));
-  const minutes = Math.floor(value / 60);
-  const remaining = String(value % 60).padStart(2, "0");
-
-  return `${minutes}:${remaining}`;
-}
-
-function timeAgo(timestamp) {
-  if (!timestamp) return "now";
-
-  const seconds = Math.max(
-    0,
-    Math.floor((Date.now() - Number(timestamp)) / 1000)
-  );
-
-  if (seconds < 60) return "now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-
-  return `${Math.floor(seconds / 3600)}h ago`;
 }
 
 async function signIn() {
@@ -179,48 +135,48 @@ async function signIn() {
     state.user = result.user;
     setConnection(true);
 
-    console.log("Anonymous Firebase login successful:", state.user.uid);
+    console.log("Firebase connected");
+    console.log("Anonymous UID:", state.user.uid);
 
     return state.user;
   } catch (error) {
     setConnection(false);
-    console.error("Firebase authentication error:", error);
+
+    console.error("Firebase error code:", error.code);
+    console.error("Firebase error:", error.message);
 
     if (error.code === "auth/invalid-api-key") {
       throw new Error(
-        "Firebase API key is invalid. Check firebase-config.js."
+        "Invalid Firebase API key. Check firebase-config.js."
       );
     }
 
     if (error.code === "auth/operation-not-allowed") {
       throw new Error(
-        "Anonymous Authentication is not enabled in Firebase Console."
+        "Enable Anonymous Authentication in Firebase Console."
       );
     }
 
-    throw new Error(
-      error.message || "Firebase authentication failed."
-    );
+    throw new Error(error.message || "Firebase login failed.");
   }
 }
 
 async function createRoom() {
   try {
     showError("");
-
     await signIn();
+    saveName();
 
-    const displayName = getName();
-    const roomCode = createRoomCode();
+    const code = createRoomCode();
+    state.roomCode = code;
 
-    saveName(displayName);
-    state.roomCode = roomCode;
+    const now = Date.now();
 
-    const initialRoom = {
-      code: roomCode,
+    await set(currentRoomRef(), {
+      code,
       hostId: state.user.uid,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
 
       state: {
         videoId: "",
@@ -229,14 +185,14 @@ async function createRoom() {
         thumbnail: "",
         playing: false,
         position: 0,
-        updatedAt: Date.now()
+        updatedAt: now
       },
 
       members: {
         [state.user.uid]: {
-          name: displayName,
+          name: getName(),
           color: randomColor(),
-          joinedAt: Date.now(),
+          joinedAt: now,
           online: true
         }
       },
@@ -244,36 +200,34 @@ async function createRoom() {
       queue: {},
       chat: {},
       activity: {}
-    };
+    });
 
-    await set(roomReference(), initialRoom);
-    await addActivity(`${displayName} created the room`);
-
+    await addActivity(`${getName()} created the room`);
     await openRoom();
   } catch (error) {
-    console.error("Create room error:", error);
+    state.roomCode = null;
     showError(error.message || "Could not create room.");
-    setConnection(false);
   }
 }
 
 async function joinRoom() {
   try {
     showError("");
-
     await signIn();
+    saveName();
 
-    const input = $("roomInput");
-    const roomCode = input?.value.trim().toUpperCase();
+    const code = $("roomInput")?.value
+      .trim()
+      .toUpperCase();
 
-    if (!roomCode || !/^[A-Z0-9]{6}$/.test(roomCode)) {
+    if (!code || !/^[A-Z0-9]{6}$/.test(code)) {
       showError("Enter a valid six-character room code.");
       return;
     }
 
-    state.roomCode = roomCode;
+    state.roomCode = code;
 
-    const snapshot = await get(roomReference());
+    const snapshot = await get(currentRoomRef());
 
     if (!snapshot.exists()) {
       state.roomCode = null;
@@ -289,25 +243,18 @@ async function joinRoom() {
       return;
     }
 
-    const displayName = getName();
-    saveName(displayName);
+    await update(currentMemberRef(), {
+      name: getName(),
+      color: randomColor(),
+      joinedAt: Date.now(),
+      online: true
+    });
 
-    await update(
-      ref(database, `rooms/${roomCode}/members/${state.user.uid}`),
-      {
-        name: displayName,
-        color: randomColor(),
-        joinedAt: Date.now(),
-        online: true
-      }
-    );
-
-    await addActivity(`${displayName} joined the room`);
+    await addActivity(`${getName()} joined the room`);
     await openRoom();
   } catch (error) {
-    console.error("Join room error:", error);
+    state.roomCode = null;
     showError(error.message || "Could not join room.");
-    setConnection(false);
   }
 }
 
@@ -319,29 +266,24 @@ async function openRoom() {
     $("roomCodeText").textContent = state.roomCode;
   }
 
-  const memberReference = ref(
-    database,
-    `rooms/${state.roomCode}/members/${state.user.uid}`
-  );
-
-  await update(memberReference, {
+  await update(currentMemberRef(), {
     online: true
   });
 
-  onDisconnect(memberReference).update({
+  onDisconnect(currentMemberRef()).update({
     online: false,
     lastSeen: serverTimestamp()
   });
 
-  if (state.roomUnsubscribe) {
-    state.roomUnsubscribe();
+  if (state.stopRoomListener) {
+    state.stopRoomListener();
   }
 
-  state.roomUnsubscribe = onValue(
-    roomReference(),
+  state.stopRoomListener = onValue(
+    currentRoomRef(),
     snapshot => {
       if (!snapshot.exists()) {
-        showToast("This room no longer exists.");
+        showToast("Room was deleted.");
         leaveRoom();
         return;
       }
@@ -349,49 +291,43 @@ async function openRoom() {
       state.room = snapshot.val();
 
       setConnection(true);
-      renderAll();
+      render();
       applyRemotePlayback();
     },
     error => {
-      console.error("Room listener error:", error);
+      console.error("Database listener error:", error);
       setConnection(false);
+      showError(error.message);
     }
   );
 
   clearInterval(state.syncTimer);
-  state.syncTimer = setInterval(correctPlaybackDrift, 4000);
+  state.syncTimer = setInterval(applyRemotePlayback, 4000);
 
-  clearInterval(state.progressTimer);
-  state.progressTimer = setInterval(updateProgressBar, 1000);
-
-  renderAll();
+  render();
 }
 
 async function leaveRoom() {
   try {
     if (state.roomCode && state.user) {
-      await update(
-        ref(database, `rooms/${state.roomCode}/members/${state.user.uid}`),
-        {
-          online: false,
-          lastSeen: serverTimestamp()
-        }
-      );
+      await update(currentMemberRef(), {
+        online: false,
+        lastSeen: serverTimestamp()
+      });
     }
   } catch (error) {
-    console.warn("Could not update offline status:", error);
+    console.warn("Leave error:", error);
+  }
+
+  if (state.stopRoomListener) {
+    state.stopRoomListener();
   }
 
   clearInterval(state.syncTimer);
-  clearInterval(state.progressTimer);
-
-  if (state.roomUnsubscribe) {
-    state.roomUnsubscribe();
-  }
 
   state.room = null;
   state.roomCode = null;
-  state.roomUnsubscribe = null;
+  state.stopRoomListener = null;
 
   $("roomView")?.classList.add("hidden");
   $("welcomeView")?.classList.remove("hidden");
@@ -399,61 +335,71 @@ async function leaveRoom() {
   setConnection(false);
 }
 
-async function updateRoomState(changes) {
-  if (!state.roomCode || !state.room || !isHost()) {
+async function addActivity(text) {
+  if (!state.roomCode) return;
+
+  await set(
+    push(db(`${roomPath()}/activity`)),
+    {
+      text: text.slice(0, 200),
+      createdAt: Date.now()
+    }
+  );
+}
+
+async function updatePlayback(values) {
+  if (!isHost()) {
     showToast("Only the host can control playback.");
     return;
   }
 
-  const currentState = state.room.state || {};
-
-  await update(ref(database, `rooms/${state.roomCode}/state`), {
-    ...currentState,
-    ...changes,
+  await update(db(`${roomPath()}/state`), {
+    ...(state.room.state || {}),
+    ...values,
     updatedAt: Date.now()
   });
 }
 
+function playerPosition() {
+  if (
+    state.playerReady &&
+    state.player &&
+    typeof state.player.getCurrentTime === "function"
+  ) {
+    return Number(state.player.getCurrentTime() || 0);
+  }
+
+  return Number(state.room?.state?.position || 0);
+}
+
 async function selectVideo(video) {
   if (!isHost()) {
-    showToast("Only the host can start a video.");
+    showToast("Only the host can select a video.");
     return;
   }
 
-  const nextState = {
+  await set(db(`${roomPath()}/state`), {
     videoId: video.videoId,
     title: video.title,
     channel: video.channel,
-    thumbnail: video.thumbnail,
+    thumbnail: video.thumbnail || "",
     playing: false,
     position: 0,
     updatedAt: Date.now()
-  };
-
-  await update(
-    ref(database, `rooms/${state.roomCode}/state`),
-    nextState
-  );
-
-  if (state.playerReady && state.player) {
-    state.player.loadVideoById(video.videoId);
-    state.player.pauseVideo();
-  }
+  });
 
   await addActivity(`${getName()} selected ${video.title}`);
   showToast("Video selected.");
 }
 
 async function addToQueue(video) {
-  if (!state.roomCode || !state.user) return;
+  const queueItem = push(db(`${roomPath()}/queue`));
 
-  const itemReference = push(queueReference());
-
-  await set(itemReference, {
+  await set(queueItem, {
     videoId: video.videoId,
     title: video.title,
     channel: video.channel,
-    thumbnail: video.thumbnail,
+    thumbnail: video.thumbnail || "",
     addedBy: state.user.uid,
     addedByName: getName(),
     addedAt: Date.now()
@@ -477,133 +423,148 @@ async function playQueueItem(itemId) {
 }
 
 async function removeQueueItem(itemId) {
-  if (!state.roomCode) return;
-
   await remove(
-    ref(database, `rooms/${state.roomCode}/queue/${itemId}`)
+    db(`${roomPath()}/queue/${itemId}`)
   );
 
   showToast("Removed from queue.");
 }
 
 async function clearQueue() {
-  if (!state.roomCode) return;
-
-  await remove(queueReference());
+  await remove(db(`${roomPath()}/queue`));
   await addActivity(`${getName()} cleared the queue`);
   showToast("Queue cleared.");
 }
 
-async function shuffleQueue() {
-  const entries = Object.values(state.room?.queue || {});
-
-  if (entries.length < 2) {
-    showToast("Add at least two videos first.");
-    return;
-  }
-
-  const shuffled = [...entries].sort(() => Math.random() - 0.5);
-
-  const newQueue = {};
-
-  shuffled.forEach((item, index) => {
-    newQueue[`item_${Date.now()}_${index}`] = item;
-  });
-
-  await set(queueReference(), newQueue);
-  await addActivity(`${getName()} shuffled the queue`);
-  showToast("Queue shuffled.");
-}
-
-async function sendChatMessage(event) {
+async function sendChat(event) {
   event.preventDefault();
 
   const input = $("chatInput");
   const text = input?.value.trim();
 
-  if (!text || !state.roomCode || !state.user) return;
+  if (!text) return;
 
-  const messageReference = push(chatReference());
-
-  await set(messageReference, {
-    uid: state.user.uid,
-    name: getName(),
-    color: findCurrentUser()?.color || randomColor(),
-    text: text.slice(0, 300),
-    createdAt: Date.now()
-  });
+  await set(
+    push(db(`${roomPath()}/chat`)),
+    {
+      uid: state.user.uid,
+      name: getName(),
+      text: text.slice(0, 300),
+      createdAt: Date.now()
+    }
+  );
 
   input.value = "";
 }
 
-async function addActivity(text) {
-  if (!state.roomCode) return;
+async function togglePlay() {
+  if (!isHost()) {
+    showToast("Only the host can control playback.");
+    return;
+  }
 
-  const activityReference = push(activityReference());
+  const current = Boolean(state.room?.state?.playing);
+  const position = playerPosition();
 
-  await set(activityReference, {
-    text: text.slice(0, 200),
-    createdAt: Date.now()
+  await updatePlayback({
+    playing: !current,
+    position
+  });
+
+  if (state.playerReady && state.player) {
+    if (current) {
+      state.player.pauseVideo();
+    } else {
+      state.player.playVideo();
+    }
+  }
+}
+
+async function seek(seconds) {
+  if (!isHost()) {
+    showToast("Only the host can seek.");
+    return;
+  }
+
+  const nextPosition = Math.max(
+    0,
+    playerPosition() + seconds
+  );
+
+  if (state.playerReady && state.player) {
+    state.player.seekTo(nextPosition, true);
+  }
+
+  await updatePlayback({
+    position: nextPosition
   });
 }
 
-async function removeMember(uid) {
-  if (!isHost() || uid === state.user.uid) return;
+async function nextVideo() {
+  if (!isHost()) return;
 
-  await remove(
-    ref(database, `rooms/${state.roomCode}/members/${uid}`)
+  const entries = Object.entries(state.room?.queue || {});
+
+  if (!entries.length) {
+    showToast("Queue is empty.");
+    return;
+  }
+
+  const currentVideo = state.room?.state?.videoId;
+
+  const index = entries.findIndex(
+    ([, item]) => item.videoId === currentVideo
   );
 
-  await addActivity(`${getName()} removed a member`);
-}
+  const next = entries[(index + 1) % entries.length];
 
-function findCurrentUser() {
-  const members = state.room?.members || {};
-  return members[state.user?.uid] || null;
+  if (next) {
+    await playQueueItem(next[0]);
+  }
 }
 
 async function searchYouTube() {
-  const input = $("searchInput");
-  const results = $("searchResults");
+  const query = $("searchInput")?.value.trim();
+  const output = $("searchResults");
   const status = $("searchStatus");
 
-  const query = input?.value.trim();
-
   if (!query) {
-    status.textContent = "Enter a search term.";
+    if (status) status.textContent = "Enter a search term.";
     return;
   }
 
-  if (
-    !YOUTUBE_API_KEY ||
-    YOUTUBE_API_KEY === "PASTE_YOUR_YOUTUBE_API_KEY_HERE"
-  ) {
-    status.textContent = "Add your YouTube API key in app.js first.";
+  const key =
+    window.YOUTUBE_API_KEY ||
+    localStorage.getItem("youtube-api-key");
+
+  if (!key) {
+    if (status) {
+      status.textContent =
+        "Add a YouTube API key before searching.";
+    }
     return;
   }
 
-  status.textContent = "Searching...";
-  results.innerHTML = "";
+  if (status) status.textContent = "Searching...";
+  if (output) output.innerHTML = "";
 
   try {
-    const endpoint = new URL(
+    const url = new URL(
       "https://www.googleapis.com/youtube/v3/search"
     );
 
-    endpoint.search = new URLSearchParams({
+    url.search = new URLSearchParams({
       part: "snippet",
       q: query,
       type: "video",
       maxResults: "12",
       videoEmbeddable: "true",
-      key: YOUTUBE_API_KEY
+      key
     });
 
-    const response = await fetch(endpoint);
+    const response = await fetch(url);
 
     if (!response.ok) {
-      const details = await response.text();
-      console.error("YouTube API error:", details);
       throw new Error("YouTube search failed.");
     }
 
@@ -614,32 +575,34 @@ async function searchYouTube() {
       title: item.snippet.title,
       channel: item.snippet.channelTitle,
       thumbnail:
-        item.snippet.thumbnails?.medium?.url ||
-        item.snippet.thumbnails?.default?.url ||
-        ""
+        item.snippet.thumbnails?.medium?.url || ""
     }));
 
     renderSearchResults(videos);
 
-    status.textContent = videos.length
-      ? `${videos.length} results found.`
-      : "No videos found.";
+    if (status) {
+      status.textContent =
+        videos.length ? "Results found." : "No videos found.";
+    }
   } catch (error) {
     console.error(error);
-    status.textContent = error.message || "Search failed.";
+
+    if (status) {
+      status.textContent = error.message;
+    }
   }
 }
 
 function renderSearchResults(videos) {
-  const results = $("searchResults");
+  const output = $("searchResults");
 
-  if (!results) return;
+  if (!output) return;
 
-  results.innerHTML = videos.map(video => `
+  output.innerHTML = videos.map(video => `
     <div class="searchItem">
       <img
-        class="searchThumb"
         src="${escapeHtml(video.thumbnail)}"
+        class="searchThumb"
         alt=""
       >
 
@@ -648,13 +611,13 @@ function renderSearchResults(videos) {
         <small>${escapeHtml(video.channel)}</small>
 
         <div class="buttonRow">
-          <button data-select-video="${escapeHtml(video.videoId)}">
+          <button data-play="${escapeHtml(video.videoId)}">
             Play now
           </button>
 
           <button
             class="secondary"
-            data-add-video="${escapeHtml(video.videoId)}"
+            data-queue="${escapeHtml(video.videoId)}"
           >
             Add to queue
           </button>
@@ -664,289 +627,29 @@ function renderSearchResults(videos) {
   `).join("");
 
   videos.forEach(video => {
-    const selectButton = document.querySelector(
-      `[data-select-video="${CSS.escape(video.videoId)}"]`
-    );
+    document
+      .querySelector(`[data-play="${CSS.escape(video.videoId)}"]`)
+      ?.addEventListener("click", () => selectVideo(video));
 
-    const addButton = document.querySelector(
-      `[data-add-video="${CSS.escape(video.videoId)}"]`
-    );
-
-    if (selectButton) {
-      selectButton.onclick = () => selectVideo(video);
-    }
-
-    if (addButton) {
-      addButton.onclick = () => addToQueue(video);
-    }
+    document
+      .querySelector(`[data-queue="${CSS.escape(video.videoId)}"]`)
+      ?.addEventListener("click", () => addToQueue(video));
   });
 }
 
-async function togglePlayPause() {
-  if (!isHost()) {
-    showToast("Only the host can control playback.");
-    return;
-  }
-
-  if (!state.room?.state?.videoId) {
-    showToast("Select a video first.");
-    return;
-  }
-
-  const currentlyPlaying = Boolean(state.room.state.playing);
-  const position = getCurrentPosition();
-
-  await updateRoomState({
-    playing: !currentlyPlaying,
-    position
-  });
-
-  if (state.playerReady && state.player) {
-    if (currentlyPlaying) {
-      state.player.pauseVideo();
-    } else {
-      state.player.playVideo();
-    }
-  }
-}
-
-async function seekByButton(seconds) {
-  if (!isHost()) {
-    showToast("Only the host can seek.");
-    return;
-  }
-
-  const duration = state.playerReady
-    ? Number(state.player.getDuration() || 0)
-    : 0;
-
-  const nextPosition = Math.max(
-    0,
-    Math.min(getCurrentPosition() + seconds, duration || Infinity)
-  );
-
-  if (state.playerReady && state.player) {
-    state.player.seekTo(nextPosition, true);
-  }
-
-  await updateRoomState({
-    position: nextPosition
-  });
-}
-
-async function seekFromBar() {
-  if (!isHost()) {
-    updateProgressBar();
-    showToast("Only the host can seek.");
-    return;
-  }
-
-  const duration = state.playerReady
-    ? Number(state.player.getDuration() || 0)
-    : 0;
-
-  const value = Number($("seekBar")?.value || 0);
-  const nextPosition = duration * value / 100;
-
-  if (state.playerReady && state.player) {
-    state.player.seekTo(nextPosition, true);
-  }
-
-  await updateRoomState({
-    position: nextPosition
-  });
-}
-
-async function goNext() {
-  if (!isHost()) {
-    showToast("Only the host can control playback.");
-    return;
-  }
-
-  const entries = Object.entries(state.room?.queue || {});
-
-  if (!entries.length) {
-    showToast("Queue is empty.");
-    return;
-  }
-
-  const currentVideoId = state.room?.state?.videoId;
-  const currentIndex = entries.findIndex(
-    ([, item]) => item.videoId === currentVideoId
-  );
-
-  const nextEntry = entries[(currentIndex + 1) % entries.length];
-
-  if (nextEntry) {
-    await playQueueItem(nextEntry[0]);
-  }
-}
-
-async function goPrevious() {
-  if (!isHost()) {
-    showToast("Only the host can control playback.");
-    return;
-  }
-
-  const entries = Object.entries(state.room?.queue || {});
-
-  if (!entries.length) {
-    showToast("Queue is empty.");
-    return;
-  }
-
-  const currentVideoId = state.room?.state?.videoId;
-  const currentIndex = entries.findIndex(
-    ([, item]) => item.videoId === currentVideoId
-  );
-
-  const previousIndex =
-    currentIndex <= 0 ? entries.length - 1 : currentIndex - 1;
-
-  await playQueueItem(entries[previousIndex][0]);
-}
-
-async function syncNow() {
-  const remoteState = state.room?.state;
-
-  if (!remoteState?.videoId) {
-    showToast("Nothing is playing.");
-    return;
-  }
-
-  if (!state.playerReady || !state.player) {
-    showToast("YouTube player is still loading.");
-    return;
-  }
-
-  state.applyingRemoteState = true;
-
-  if (state.player.getVideoData().video_id !== remoteState.videoId) {
-    state.player.loadVideoById(remoteState.videoId);
-  }
-
-  state.player.seekTo(
-    Number(remoteState.position || 0),
-    true
-  );
-
-  if (remoteState.playing) {
-    state.player.playVideo();
-  } else {
-    state.player.pauseVideo();
-  }
-
-  setTimeout(() => {
-    state.applyingRemoteState = false;
-  }, 500);
-
-  showToast("Playback synchronized.");
-}
-
-function applyRemotePlayback() {
-  const remoteState = state.room?.state;
-
-  if (!remoteState || !state.playerReady || !state.player) {
-    return;
-  }
-
-  const currentVideoId =
-    state.player.getVideoData?.()?.video_id || "";
-
-  if (remoteState.videoId && currentVideoId !== remoteState.videoId) {
-    state.applyingRemoteState = true;
-    state.player.cueVideoById(remoteState.videoId);
-
-    setTimeout(() => {
-      state.applyingRemoteState = false;
-      syncNow();
-    }, 500);
-
-    return;
-  }
-
-  const localPlaying =
-    state.player.getPlayerState?.() === YT.PlayerState.PLAYING;
-
-  if (remoteState.playing && !localPlaying) {
-    state.applyingRemoteState = true;
-    state.player.playVideo();
-
-    setTimeout(() => {
-      state.applyingRemoteState = false;
-    }, 500);
-  }
-
-  if (!remoteState.playing && localPlaying) {
-    state.applyingRemoteState = true;
-    state.player.pauseVideo();
-
-    setTimeout(() => {
-      state.applyingRemoteState = false;
-    }, 500);
-  }
-}
-
-function correctPlaybackDrift() {
-  const remoteState = state.room?.state;
-
-  if (
-    !remoteState ||
-    !remoteState.videoId ||
-    !state.playerReady ||
-    !state.player ||
-    state.applyingRemoteState
-  ) {
-    return;
-  }
-
-  const remotePosition = Number(remoteState.position || 0);
-  const localPosition = Number(state.player.getCurrentTime() || 0);
-  const drift = Math.abs(localPosition - remotePosition);
-
-  if (drift > 2) {
-    state.applyingRemoteState = true;
-    state.player.seekTo(remotePosition, true);
-
-    setTimeout(() => {
-      state.applyingRemoteState = false;
-    }, 500);
-  }
-}
-
-function updateProgressBar() {
-  if (!state.playerReady || !state.player) return;
-
-  const duration = Number(state.player.getDuration() || 0);
-  const current = Number(state.player.getCurrentTime() || 0);
-
-  if ($("seekBar")) {
-    $("seekBar").value = duration
-      ? String((current / duration) * 100)
-      : "0";
-  }
-
-  if ($("currentTimeText")) {
-    $("currentTimeText").textContent = formatTime(current);
-  }
-
-  if ($("durationText")) {
-    $("durationText").textContent = formatTime(duration);
-  }
-}
-
-function renderAll() {
+function render() {
   renderRoomInfo();
-  renderPlaybackInfo();
-  renderQueue();
+  renderPlayback();
   renderMembers();
+  renderQueue();
   renderChat();
   renderActivity();
 }
 
 function renderRoomInfo() {
   if ($("roomCodeText")) {
-    $("roomCodeText").textContent = state.roomCode || "------";
+    $("roomCodeText").textContent =
+      state.roomCode || "------";
   }
 
   if ($("memberCount")) {
@@ -957,12 +660,12 @@ function renderRoomInfo() {
 
   if ($("hostNotice")) {
     $("hostNotice").textContent = isHost()
-      ? "You are the host. Your playback controls update the room."
-      : "Only the host controls room playback.";
+      ? "You are the host."
+      : "Only the host controls playback.";
   }
 }
 
-function renderPlaybackInfo() {
+function renderPlayback() {
   const playback = state.room?.state || {};
 
   if ($("nowPlayingTitle")) {
@@ -972,51 +675,59 @@ function renderPlaybackInfo() {
 
   if ($("nowPlayingChannel")) {
     $("nowPlayingChannel").textContent =
-      playback.channel || "Choose a video from Search";
+      playback.channel || "Select a video";
   }
 
   if ($("playPauseButton")) {
     $("playPauseButton").textContent =
       playback.playing ? "Pause" : "Play";
   }
+}
 
-  if ($("syncIndicator")) {
-    $("syncIndicator").textContent =
-      playback.videoId ? "Synced room" : "Not synced";
-  }
+function renderMembers() {
+  const output = $("membersList");
+
+  if (!output) return;
+
+  output.innerHTML = Object.entries(
+    state.room?.members || {}
+  ).map(([uid, member]) => `
+    <div class="memberItem">
+      <strong>${escapeHtml(member.name || "Guest")}</strong>
+      <small>
+        ${uid === state.room.hostId ? "Host · " : ""}
+        ${member.online ? "Online" : "Offline"}
+      </small>
+    </div>
+  `).join("");
 }
 
 function renderQueue() {
-  const element = $("queueList");
+  const output = $("queueList");
 
-  if (!element) return;
+  if (!output) return;
 
-  const entries = Object.entries(state.room?.queue || {});
+  const items = Object.entries(state.room?.queue || {});
 
-  if (!entries.length) {
-    element.innerHTML =
-      `<p class="muted">Queue is empty. Search for a video to add one.</p>`;
+  if (!items.length) {
+    output.innerHTML = `<p class="muted">Queue is empty.</p>`;
     return;
   }
 
-  element.innerHTML = entries.map(([id, item]) => `
+  output.innerHTML = items.map(([id, item]) => `
     <div class="queueItem">
       <img
+        src="${escapeHtml(item.thumbnail || "")}"
         class="queueThumb"
-        src="${escapeHtml(item.thumbnail)}"
         alt=""
       >
 
       <div class="queueInfo">
         <strong>${escapeHtml(item.title)}</strong>
         <small>${escapeHtml(item.channel || "")}</small>
-        <small>Added by ${escapeHtml(item.addedByName || "Guest")}</small>
       </div>
 
-      <button
-        class="secondary"
-        data-play-queue="${escapeHtml(id)}"
-      >
+      <button data-play-queue="${escapeHtml(id)}">
         Play
       </button>
 
@@ -1029,117 +740,114 @@ function renderQueue() {
     </div>
   `).join("");
 
-  element.querySelectorAll("[data-play-queue]").forEach(button => {
-    button.onclick = () => playQueueItem(button.dataset.playQueue);
+  output.querySelectorAll("[data-play-queue]").forEach(button => {
+    button.addEventListener(
+      "click",
+      () => playQueueItem(button.dataset.playQueue)
+    );
   });
 
-  element.querySelectorAll("[data-remove-queue]").forEach(button => {
-    button.onclick = () => removeQueueItem(button.dataset.removeQueue);
-  });
-}
-
-function renderMembers() {
-  const element = $("membersList");
-
-  if (!element) return;
-
-  const entries = Object.entries(state.room?.members || {});
-
-  element.innerHTML = entries.map(([uid, member]) => `
-    <div class="memberItem">
-      <div
-        class="chatAvatar"
-        style="background:${escapeHtml(member.color || "#4f46e5")}"
-      >
-        ${escapeHtml((member.name || "G").charAt(0).toUpperCase())}
-      </div>
-
-      <div class="memberInfo">
-        <strong>${escapeHtml(member.name || "Guest")}</strong>
-        <small>
-          ${uid === state.room?.hostId ? "Host · " : ""}
-          ${member.online ? "Online" : "Offline"}
-        </small>
-      </div>
-
-      ${
-        isHost() && uid !== state.user?.uid
-          ? `
-            <button
-              class="danger"
-              data-remove-member="${escapeHtml(uid)}"
-            >
-              Remove
-            </button>
-          `
-          : ""
-      }
-    </div>
-  `).join("");
-
-  element.querySelectorAll("[data-remove-member]").forEach(button => {
-    button.onclick = () => removeMember(button.dataset.removeMember);
+  output.querySelectorAll("[data-remove-queue]").forEach(button => {
+    button.addEventListener(
+      "click",
+      () => removeQueueItem(button.dataset.removeQueue)
+    );
   });
 }
 
 function renderChat() {
-  const element = $("chatMessages");
+  const output = $("chatMessages");
 
-  if (!element) return;
+  if (!output) return;
 
-  const messages = Object.values(state.room?.chat || {})
-    .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  const messages = Object.values(
+    state.room?.chat || {}
+  ).sort((a, b) => a.createdAt - b.createdAt);
 
-  if (!messages.length) {
-    element.innerHTML = `<p class="muted">No messages yet.</p>`;
-    return;
-  }
-
-  element.innerHTML = messages.map(message => `
+  output.innerHTML = messages.map(message => `
     <div class="chatMessage">
-      <div
-        class="chatAvatar"
-        style="background:${escapeHtml(message.color || "#4f46e5")}"
-      >
-        ${escapeHtml((message.name || "G").charAt(0).toUpperCase())}
-      </div>
-
-      <div class="chatContent">
-        <strong>${escapeHtml(message.name || "Guest")}</strong>
-        <small class="muted">
-          ${escapeHtml(timeAgo(message.createdAt))}
-        </small>
-        <p>${escapeHtml(message.text)}</p>
-      </div>
+      <strong>${escapeHtml(message.name || "Guest")}</strong>
+      <span>${escapeHtml(message.text)}</span>
     </div>
   `).join("");
 
-  element.scrollTop = element.scrollHeight;
+  output.scrollTop = output.scrollHeight;
 }
 
 function renderActivity() {
-  const element = $("activityList");
+  const output = $("activityList");
 
-  if (!element) return;
+  if (!output) return;
 
-  const items = Object.values(state.room?.activity || {})
-    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
-    .slice(0, 30);
+  const items = Object.values(
+    state.room?.activity || {}
+  ).sort((a, b) => b.createdAt - a.createdAt);
 
-  element.innerHTML = items.map(item => `
+  output.innerHTML = items.slice(0, 30).map(item => `
     <div class="activityItem">
-      <span>•</span>
-      <div>
-        <div>${escapeHtml(item.text)}</div>
-        <small>${escapeHtml(timeAgo(item.createdAt))}</small>
-      </div>
+      ${escapeHtml(item.text)}
     </div>
-  `).join("") || `<p class="muted">No room activity yet.</p>`;
+  `).join("");
 }
 
-function initializeYouTubePlayer() {
-  if (typeof YT === "undefined" || !YT.Player) {
-    setTimeout(initializeYouTubePlayer, 500);
+function applyRemotePlayback() {
+  const remote = state.room?.state;
+
+  if (
+    !remote?.videoId ||
+    !state.playerReady ||
+    !state.player
+  ) {
+    return;
+  }
+
+  const currentVideo =
+    state.player.getVideoData?.()?.video_id || "";
+
+  if (currentVideo !== remote.videoId) {
+    state.applyingRemote = true;
+    state.player.cueVideoById(remote.videoId);
+
+    setTimeout(() => {
+      state.applyingRemote = false;
+      applyRemotePlayback();
+    }, 700);
+
+    return;
+  }
+
+  const currentTime =
+    Number(state.player.getCurrentTime?.() || 0);
+
+  if (Math.abs(currentTime - Number(remote.position || 0)) > 3) {
+    state.applyingRemote = true;
+
+    state.player.seekTo(
+      Number(remote.position || 0),
+      true
+    );
+
+    setTimeout(() => {
+      state.applyingRemote = false;
+    }, 500);
+  }
+
+  state.applyingRemote = true;
+
+  if (remote.playing) {
+    state.player.playVideo();
+  } else {
+    state.player.pauseVideo();
+  }
+
+  setTimeout(() => {
+    state.applyingRemote = false;
+  }, 500);
+}
+
+function setupYouTubePlayer() {
+  if (!window.YT || !YT.Player) {
+    setTimeout(setupYouTubePlayer, 500);
     return;
   }
 
@@ -1155,225 +863,94 @@ function initializeYouTubePlayer() {
       rel: 0,
       modestbranding: 1
     },
+
     events: {
       onReady: () => {
         state.playerReady = true;
-        $("playerLoading")?.classList.add("hidden");
         applyRemotePlayback();
       },
 
-      onStateChange: event => {
-        if (state.applyingRemoteState) return;
+      onStateChange: async event => {
+        if (state.applyingRemote || !isHost()) return;
 
         if (event.data === YT.PlayerState.PLAYING) {
-          handlePlayerPlaying();
+          await updatePlayback({
+            playing: true,
+            position: playerPosition()
+          });
         }
 
         if (event.data === YT.PlayerState.PAUSED) {
-          handlePlayerPaused();
+          await updatePlayback({
+            playing: false,
+            position: playerPosition()
+          });
         }
 
         if (event.data === YT.PlayerState.ENDED) {
-          handlePlayerEnded();
-        }
-      },
+          await updatePlayback({
+            playing: false,
+            position: 0
+          });
 
-      onError: event => {
-        console.error("YouTube player error:", event.data);
-        showToast("This YouTube video cannot be played.");
+          await nextVideo();
+        }
       }
     }
   });
 }
 
-async function handlePlayerPlaying() {
-  if (!isHost() || state.applyingRemoteState) return;
-
-  await updateRoomState({
-    playing: true,
-    position: getCurrentPosition()
-  });
-}
-
-async function handlePlayerPaused() {
-  if (!isHost() || state.applyingRemoteState) return;
-
-  await updateRoomState({
-    playing: false,
-    position: getCurrentPosition()
-  });
-}
-
-async function handlePlayerEnded() {
-  if (!isHost() || state.applyingRemoteState) return;
-
-  await updateRoomState({
-    playing: false,
-    position: 0
-  });
-
-  await goNext();
-}
-
-function switchTab(tabId) {
-  document.querySelectorAll(".tabPanel").forEach(panel => {
-    panel.classList.add("hidden");
-  });
-
-  document.querySelectorAll(".tab").forEach(tab => {
-    tab.classList.remove("active");
-  });
-
-  $(tabId)?.classList.remove("hidden");
-
-  document
-    .querySelector(`[data-tab="${tabId}"]`)
-    ?.classList.add("active");
-}
-
-function copyRoomCode() {
-  if (!state.roomCode) return;
-
-  navigator.clipboard
-    .writeText(state.roomCode)
-    .then(() => showToast("Room code copied."))
-    .catch(() => showToast(`Room code: ${state.roomCode}`));
-}
-
-async function shareRoom() {
-  if (!state.roomCode) return;
-
-  const shareData = {
-    title: "Join my SyncRoom",
-    text: `Join my SyncRoom room: ${state.roomCode}`,
-    url: location.href
-  };
-
-  if (navigator.share) {
-    await navigator.share(shareData);
-  } else {
-    copyRoomCode();
-  }
-}
-
-function loadSavedSettings() {
-  const darkTheme =
-    localStorage.getItem("syncroom-dark") !== "false";
-
-  const largeControls =
-    localStorage.getItem("syncroom-large-controls") === "true";
-
-  const dataSaver =
-    localStorage.getItem("syncroom-data-saver") === "true";
-
-  document.documentElement.classList.toggle("light", !darkTheme);
-  document.body.classList.toggle("largeControls", largeControls);
-
-  if ($("darkThemeToggle")) {
-    $("darkThemeToggle").checked = darkTheme;
-  }
-
-  if ($("largeControlsToggle")) {
-    $("largeControlsToggle").checked = largeControls;
-  }
-
-  if ($("dataSaverToggle")) {
-    $("dataSaverToggle").checked = dataSaver;
-  }
-
-  const savedName = localStorage.getItem("syncroom-name");
-
-  if (savedName && $("nameInput")) {
-    $("nameInput").value = savedName;
-  }
-}
-
-function saveSettings() {
-  const darkTheme = $("darkThemeToggle")?.checked ?? true;
-  const largeControls = $("largeControlsToggle")?.checked ?? false;
-  const dataSaver = $("dataSaverToggle")?.checked ?? false;
-
-  localStorage.setItem("syncroom-dark", String(darkTheme));
-  localStorage.setItem(
-    "syncroom-large-controls",
-    String(largeControls)
-  );
-  localStorage.setItem("syncroom-data-saver", String(dataSaver));
-
-  document.documentElement.classList.toggle("light", !darkTheme);
-  document.body.classList.toggle("largeControls", largeControls);
-
-  showToast("Settings saved.");
-}
-
-function setupInstallPrompt() {
-  window.addEventListener("beforeinstallprompt", event => {
-    event.preventDefault();
-    state.deferredInstall = event;
-    $("installButton")?.classList.remove("hidden");
-  });
-
-  $("installButton")?.addEventListener("click", async () => {
-    if (!state.deferredInstall) return;
-
-    state.deferredInstall.prompt();
-    await state.deferredInstall.userChoice;
-
-    state.deferredInstall = null;
-    $("installButton")?.classList.add("hidden");
-  });
-}
-
 function setupEvents() {
-  $("createRoomButton")?.addEventListener("click", createRoom);
-  $("joinRoomButton")?.addEventListener("click", joinRoom);
+  $("createRoomButton")?.addEventListener(
+    "click",
+    createRoom
+  );
 
-  $("showJoinButton")?.addEventListener("click", () => {
-    $("joinBox")?.classList.toggle("hidden");
-  });
+  $("joinRoomButton")?.addEventListener(
+    "click",
+    joinRoom
+  );
 
-  $("copyRoomButton")?.addEventListener("click", copyRoomCode);
-  $("shareRoomButton")?.addEventListener("click", shareRoom);
-  $("leaveRoomButton")?.addEventListener("click", leaveRoom);
-
-  $("searchButton")?.addEventListener("click", searchYouTube);
-
-  $("searchInput")?.addEventListener("keydown", event => {
-    if (event.key === "Enter") {
-      searchYouTube();
-    }
-  });
-
-  $("chatForm")?.addEventListener("submit", sendChatMessage);
+  $("leaveRoomButton")?.addEventListener(
+    "click",
+    leaveRoom
+  );
 
   $("playPauseButton")?.addEventListener(
     "click",
-    togglePlayPause
+    togglePlay
   );
 
   $("previousButton")?.addEventListener(
     "click",
-    goPrevious
+    () => seek(-10)
   );
 
   $("nextButton")?.addEventListener(
     "click",
-    goNext
+    () => seek(10)
   );
 
-  $("syncNowButton")?.addEventListener(
+  $("nextVideoButton")?.addEventListener(
     "click",
-    syncNow
+    nextVideo
   );
 
-  $("seekBar")?.addEventListener(
-    "change",
-    seekFromBar
-  );
-
-  $("shuffleButton")?.addEventListener(
+  $("searchButton")?.addEventListener(
     "click",
-    shuffleQueue
+    searchYouTube
+  );
+
+  $("searchInput")?.addEventListener(
+    "keydown",
+    event => {
+      if (event.key === "Enter") searchYouTube();
+    }
+  );
+
+  $("chatForm")?.addEventListener(
+    "submit",
+    sendChat
   );
 
   $("clearQueueButton")?.addEventListener(
@@ -1381,72 +958,47 @@ function setupEvents() {
     clearQueue
   );
 
-  $("darkThemeToggle")?.addEventListener(
-    "change",
-    saveSettings
+  $("roomInput")?.addEventListener(
+    "input",
+    event => {
+      event.target.value = event.target.value
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 6);
+    }
   );
 
-  $("largeControlsToggle")?.addEventListener(
-    "change",
-    saveSettings
+  $("nameInput")?.addEventListener(
+    "input",
+    saveName
   );
-
-  $("dataSaverToggle")?.addEventListener(
-    "change",
-    saveSettings
-  );
-
-  $("saveProfileButton")?.addEventListener(() => {
-    const displayName = getName();
-    saveName(displayName);
-    showToast("Profile saved.");
-  });
-
-  document.querySelectorAll(".tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      switchTab(tab.dataset.tab);
-    });
-  });
-
-  $("roomInput")?.addEventListener("input", event => {
-    event.target.value = event.target.value
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, "")
-      .slice(0, 6);
-  });
-
-  $("nameInput")?.addEventListener("input", event => {
-    saveName(event.target.value.slice(0, 24));
-  });
 }
 
-window.onYouTubeIframeAPIReady = initializeYouTubePlayer;
+window.onYouTubeIframeAPIReady = setupYouTubePlayer;
 
-setupEvents();
-loadSavedSettings();
-setupInstallPrompt();
-initializeYouTubePlayer();
+async function startApp() {
+  setupEvents();
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(error => {
-      console.warn("Service worker registration failed:", error);
-    });
-  });
-}
+  const savedName = localStorage.getItem("syncroom-name");
 
-console.log("SyncRoom app loaded.");
-async function testFirebase() {
-  try {
-    const result = await signInAnonymously(auth);
-
-    console.log("Firebase connected");
-    console.log("Project:", auth.app.options.projectId);
-    console.log("Anonymous UID:", result.user.uid);
-  } catch (error) {
-    console.error("Firebase error code:", error.code);
-    console.error("Firebase error message:", error.message);
+  if (savedName && $("nameInput")) {
+    $("nameInput").value = savedName;
   }
+
+  try {
+    await signIn();
+  } catch (error) {
+    showError(error.message);
+  }
+
+  setupYouTubePlayer();
 }
 
-testFirebase();
+startApp();
+signIn()
+  .then(() => {
+    console.log("Backend test passed");
+  })
+  .catch(error => {
+    console.error("Backend test failed:", error);
+  });
