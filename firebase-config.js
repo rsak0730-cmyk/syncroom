@@ -22,13 +22,13 @@ import {
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_FIREBASE_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.firebasestorage.app",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCmZvHjY3wol0ED6YDDaReNPGlNMGKello",
+  authDomain: "syncroom-1c200.firebaseapp.com",
+  databaseURL: "PASTE_REALTIME_DATABASE_URL_HERE",
+  projectId: "syncroom-1c200",
+  storageBucket: "syncroom-1c200.firebasestorage.app",
+  messagingSenderId: "248664766695",
+  appId: "1:248664766695:web:f873e5c3f690dcc2cd0a42"
 };
 
 const app = initializeApp(firebaseConfig);
