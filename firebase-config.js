@@ -25,10 +25,7 @@ import {
 const firebaseConfig = {
   apiKey: "AIzaSyCmZvHjY3wol0ED6YDDaReNPGlNMGKello",
   authDomain: "syncroom-1c200.firebaseapp.com",
-
-  // Replace this with the exact URL shown in Firebase Realtime Database
-  databaseURL: "PASTE_YOUR_REAL_DATABASE_URL_HERE",
-
+  databaseURL: "https://syncroom-1c200-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "syncroom-1c200",
   storageBucket: "syncroom-1c200.firebasestorage.app",
   messagingSenderId: "248664766695",
