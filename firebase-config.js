@@ -22,24 +22,22 @@ import {
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCmZvHjY3wol0ED6YDDaReNPGlNMGKello",
-  authDomain: "syncroom-1c200.firebaseapp.com",
-  databaseURL: "https://syncroom-1c200-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "syncroom-1c200",
-  storageBucket: "syncroom-1c200.firebasestorage.app",
-  messagingSenderId: "248664766695",
-  appId: "1:248664766695:web:d636bcaa399206bfcd0a42"
+  apiKey: "AIzaSyA04zCMzeXMPihK5kx2tzCftFrbBpnHCW4",
+  authDomain: "syncroom-new.firebaseapp.com",
+  databaseURL: "https://syncroom-new-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "syncroom-new",
+  storageBucket: "syncroom-new.firebasestorage.app",
+  messagingSenderId: "923178266794",
+  appId: "1:923178266794:web:ad07d1e4841b5ddff820d3"
 };
 
 const app = initializeApp(firebaseConfig);
 
-const database = getDatabase(app);
-const auth = getAuth(app);
+export const database = getDatabase(app);
+export const auth = getAuth(app);
 
 export {
   app,
-  database,
-  auth,
   ref,
   set,
   get,
