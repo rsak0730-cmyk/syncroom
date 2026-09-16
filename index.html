@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="SyncRoom - listen together on YouTube">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  <title>SyncRoom</title>
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brandIcon">♫</span>
+      <span>SyncRoom</span>
+    </div>
+    <div id="connectionStatus" class="status offline">Offline</div>
+  </header>
+
+  <main class="container">
+    <section id="welcomeView" class="welcome">
+      <div class="hero card">
+        <div class="heroIcon">♫</div>
+        <h1>Listen together</h1>
+        <p>Create a room, share the code, and control YouTube playback together.</p>
+
+        <label for="nameInput">Your name</label>
+        <input id="nameInput" maxlength="24" placeholder="Enter your name">
+
+        <div class="buttonRow">
+          <button id="createRoomButton">Create room</button>
+          <button id="showJoinButton" class="secondary">Join room</button>
+        </div>
+
+        <div id="joinBox" class="joinBox hidden">
+          <label for="roomInput">Room code</label>
+          <input id="roomInput" maxlength="6" placeholder="ABC123">
+          <button id="joinRoomButton">Join room</button>
+        </div>
+
+        <p id="welcomeError" class="error"></p>
+      </div>
+    </section>
+
+    <section id="roomView" class="hidden">
+      <div class="roomBar card">
+        <div>
+          <small>Room code</small>
+          <strong id="roomCodeText">------</strong>
+        </div>
+        <div class="roomActions">
+          <button id="copyRoomButton" class="secondary">Copy code</button>
+          <button id="shareRoomButton" class="secondary">Share</button>
+          <button id="leaveRoomButton" class="danger">Leave</button>
+        </div>
+      </div>
+
+      <nav class="tabs" aria-label="Main navigation">
+        <button class="tab active" data-tab="listenTab">Listen</button>
+        <button class="tab" data-tab="searchTab">Search</button>
+        <button class="tab" data-tab="chatTab">Chat</button>
+        <button class="tab" data-tab="membersTab">Members</button>
+        <button class="tab" data-tab="settingsTab">Settings</button>
+      </nav>
+
+      <section id="listenTab" class="tabPanel">
+        <div class="listenGrid">
+          <article class="card playerCard">
+            <div class="sectionHeading">
+              <div>
+                <small>Now playing</small>
+                <h2 id="nowPlayingTitle">Nothing playing</h2>
+                <p id="nowPlayingChannel">Choose a video from Search</p>
+              </div>
+              <span id="syncIndicator" class="syncBadge">Not synced</span>
+            </div>
+
+            <div class="youtubeFrame">
+              <div id="playerLoading" class="playerLoading">Player loading...</div>
+              <div id="player"></div>
+            </div>
+
+            <div class="controlRow">
+              <button id="previousButton" aria-label="Previous">◀◀</button>
+              <button id="playPauseButton" class="primaryControl">Play</button>
+              <button id="nextButton" aria-label="Next">▶▶</button>
+              <button id="syncNowButton">Sync</button>
+            </div>
+
+            <input id="seekBar" type="range" min="0" max="100" value="0" aria-label="Seek">
+
+            <div class="timeRow">
+              <span id="currentTimeText">0:00</span>
+              <span id="durationText">0:00</span>
+            </div>
+
+            <div id="hostNotice" class="notice">
+              Only the host controls room playback.
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="sectionHeading">
+              <h2>Queue</h2>
+              <div class="queueButtons">
+                <button id="shuffleButton" class="secondary">Shuffle</button>
+                <button id="clearQueueButton" class="secondary">Clear</button>
+              </div>
+            </div>
+            <div id="queueList" class="list"></div>
+          </article>
+
+          <article class="card">
+            <h2>Room activity</h2>
+            <div id="activityList" class="list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="searchTab" class="tabPanel hidden">
+        <article class="card">
+          <h2>Search YouTube</h2>
+          <p class="muted">Search for videos and add them to the shared queue.</p>
+
+          <div class="searchRow">
+            <input id="searchInput" placeholder="Song, artist, playlist..." autocomplete="off">
+            <button id="searchButton">Search</button>
+          </div>
+
+          <p id="searchStatus" class="muted"></p>
+          <div id="searchResults" class="searchResults"></div>
+        </article>
+      </section>
+
+      <section id="chatTab" class="tabPanel hidden">
+        <article class="card chatCard">
+          <h2>Room chat</h2>
+          <div id="chatMessages" class="chatMessages"></div>
+          <form id="chatForm" class="chatForm">
+            <input id="chatInput" maxlength="300" placeholder="Write a message...">
+            <button type="submit">Send</button>
+          </form>
+        </article>
+      </section>
+
+      <section id="membersTab" class="tabPanel hidden">
+        <article class="card">
+          <div class="sectionHeading">
+            <h2>Members</h2>
+            <span id="memberCount" class="countBadge">0</span>
+          </div>
+          <div id="membersList" class="list"></div>
+        </article>
+      </section>
+
+      <section id="settingsTab" class="tabPanel hidden">
+        <article class="card settings">
+          <h2>Settings</h2>
+
+          <label class="setting">
+            <span>Dark theme</span>
+            <input id="darkThemeToggle" type="checkbox" checked>
+          </label>
+
+          <label class="setting">
+            <span>Large controls</span>
+            <input id="largeControlsToggle" type="checkbox">
+          </label>
+
+          <label class="setting">
+            <span>Data saver</span>
+            <input id="dataSaverToggle" type="checkbox">
+          </label>
+
+          <label for="languageSelect">Language</label>
+          <select id="languageSelect">
+            <option value="en">English</option>
+            <option value="hi">हिन्दी</option>
+            <option value="bn">বাংলা</option>
+          </select>
+
+          <button id="saveProfileButton">Save profile</button>
+          <button id="installButton" class="secondary hidden">Install app</button>
+        </article>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script type="module" src="app.js"></script>
+</body>
+  </html>
