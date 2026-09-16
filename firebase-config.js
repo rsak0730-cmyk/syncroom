@@ -24,7 +24,7 @@ import {
 const firebaseConfig = {
   apiKey: "AIzaSyCmZvHjY3wol0ED6YDDaReNPGlNMGKello",
   authDomain: "syncroom-1c200.firebaseapp.com",
-  databaseURL: "https://syncroom-1c200-default-rtdb.asia-southeast1.firebasedatabase.app",
+  databaseURL: "https://syncroom-1c200-default-rtdb.asia-southeast1.firebasedatabase.app/",
   projectId: "syncroom-1c200",
   storageBucket: "syncroom-1c200.firebasestorage.app",
   messagingSenderId: "248664766695",
